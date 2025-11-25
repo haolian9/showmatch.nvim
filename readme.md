@@ -9,9 +9,6 @@ it always distracts me.
 
 also it seems &showmatch doesnt honor `hi MatchParen`.
 
-## todo
-* WinEnter&InsertEnter -> current buf insertCharPre
-
 ## status
 * just works (tm)
 * the use of ffi may crash nvim
@@ -21,4 +18,5 @@ also it seems &showmatch doesnt honor `hi MatchParen`.
 * haolian9/infra.nvim
 
 ## usage
+* `:set noshowmatch`
 * `:lua require'showmatch'.activate()`
