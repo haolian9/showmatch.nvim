@@ -1,20 +1,30 @@
 local M = {}
 
----NB: there is only one current buf/win, therefor only one match
-
 local augroups = require("infra.augroups")
-local itertools = require("infra.itertools")
+local its = require("infra.its")
 local ni = require("infra.ni")
 local prefer = require("infra.prefer")
+local setlib = require("infra.setlib")
+local strlib = require("infra.strlib")
 local unsafe = require("infra.unsafe")
 
 local uv = vim.uv
 
-local facts = {
-  xmark_ns = ni.create_namespace("showmatch://xmark"),
-  remain_time = 500, --in ms; see &matchtime
-  ignore_buftypes = itertools.toset({ "terminal", "help", "quickfix" }),
-}
+local facts = {}
+do
+  facts.xmark_ns = ni.create_namespace("showmatch://xmark")
+
+  --in ms
+  --concern: autocmd OptionSet &matchtime
+  facts.remain_time = 500
+
+  facts.ignore_buftypes = setlib.new("terminal", "help", "quickfix")
+
+  --concern: autocmd OptionSet &matchpairs
+  facts.rights = its(strlib.iter_splits(vim.go.matchpairs, ",")) --
+    :map(function(pair) return pair:sub(3, 3) end)
+    :toset()
+end
 
 local marker = {}
 do
@@ -38,7 +48,7 @@ do
   end
 end
 
-local aug, bufaug ---@type infra.Augroup?, infra.BufAugroup?
+local aug, bug ---@type infra.Augroup?, infra.BufAugroup?
 local timer = uv.new_timer()
 local clear_match = vim.schedule_wrap(function() marker:clear() end)
 
@@ -50,7 +60,7 @@ function M.activate()
 
   ---impl
   ---a) repeats:insertcharpre
-  ---b) preats:winenter -> once:insertenter -> repeats:insertcharPre
+  ---b) repeats:winenter -> once:insertenter -> repeats:insertcharPre
   ---as insertcharpre can be fired frequently, b can be efficient than a
   aug:repeats({ "BufWinEnter", "WinEnter" }, {
     callback = function(args)
@@ -58,23 +68,27 @@ function M.activate()
       --todo: `:term` hasnt been taken down
       if facts.ignore_buftypes[prefer.bo(bufnr, "buftype")] then return end
 
-      if bufaug then
-        if bufaug.bufnr == bufnr then return end
-        bufaug:unlink()
-        bufaug = augroups.BufAugroup(bufnr, "showmatch://insidebuf", false)
-      else
-        bufaug = augroups.BufAugroup(bufnr, "showmatch://insidebuf", false)
+      if bug then
+        if bug.bufnr == bufnr then return end
+        bug:unlink()
       end
+      bug = augroups.BufAugroup(bufnr, "showmatch", false)
 
-      bufaug:once("InsertEnter", {
+      bug:once("InsertEnter", {
         callback = function() --
-          local function insertcharpre()
+          local function post_insertchar()
             local lnum, col = unsafe.findmatch()
             if not (lnum and col) then return end
+            timer:stop()
             marker:set(bufnr, lnum, col)
             timer:start(facts.remain_time, 0, clear_match)
           end
-          bufaug:repeats("InsertCharPre", { callback = vim.schedule_wrap(insertcharpre) })
+          bug:repeats("InsertCharPre", {
+            callback = function()
+              if not facts.rights[vim.v.char] then return end
+              vim.schedule(post_insertchar)
+            end,
+          })
         end,
       })
     end,
@@ -90,9 +104,9 @@ function M.deactivate()
     aug = nil
   end
 
-  if bufaug ~= nil then
-    bufaug:unlink()
-    bufaug = nil
+  if bug ~= nil then
+    bug:unlink()
+    bug = nil
   end
 
   timer:stop()
